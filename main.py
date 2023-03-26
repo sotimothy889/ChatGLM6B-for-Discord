@@ -1,23 +1,25 @@
 from transformers import AutoTokenizer, AutoModel
+from pymongo import MongoClient, UpdateOne, InsertOne
 import pymongo
 import discord
 from discord.ext import commands
 import os
 import alive
+import torch
 
-tokenizer = AutoTokenizer.from_pretrained("THUDM/chatglm-6b",
-                                          trust_remote_code=True)
-model = AutoModel.from_pretrained("THUDM/chatglm-6b",
-                                  trust_remote_code=True).half().cuda()
+device = torch.device('cuda:1')
+tokenizer = AutoTokenizer.from_pretrained("silver/chatglm-6b-slim", trust_remote_code=True)
+model = AutoModel.from_pretrained("silver/chatglm-6b-slim", trust_remote_code=True).half().cuda()
 
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix="-ai", intents=intents)
+bot = commands.Bot(command_prefix="-ai ", intents=intents)
 
 alive.keep_alive()
 
-client = pymongo.MongoClient()
-db = client["db"]
+client = MongoClient()
+db = client["hug"]
+print("Running on PyMongo "+str(pymongo.__version__))
 
 @bot.event
 async def on_ready():
@@ -29,14 +31,14 @@ async def on_message(message):
   if message.author == bot.user:
     return
 
-  elif message.guild.id in db["yes"] and message.content.startswith(
+  elif  db["yes"].find({str(message.guild.id): {"$exists": True}}) and message.content.startswith(
       "-ai ") != True:
-    if db["yes"][message.guild.id] == True:
+    if db["yes"][str(message.guild.id)] == True:
       response, history = model.chat(tokenizer,
                                      str(message.content),
-                                     history=db["history"][message.guild.id])
+                                     history=db["yes"].find_one({'id': str(message.guild.id)})['history'])
       await message.channel.send(response)
-      db["history"][message.guild.id] = history
+      db["yes"].update_one({'id': str(message.guild.id)}, {'$set': {'history': history}})
 
   else:
     await bot.process_commands(message)
@@ -44,22 +46,25 @@ async def on_message(message):
 
 @bot.hybrid_command(name="respond")
 async def repeat(ctx):
-  if ctx.guild.id not in db["yes"]:
-    db["yes"][ctx.guild.id] = True
+  if db["yes"].find_one({'id': str(ctx.guild.id)})==None:
     await ctx.send("The bot will respond to your messages. Welcome to the Hugging Face ChatGLM-6B Chatbot ported to Discord.")
     response, history = model.chat(tokenizer, "Hello", history=[])
-    db["history"][ctx.guild.id] = history
-  elif db["yes"][ctx.guild.id] == False:
-    db["yes"][ctx.guild.id] = True
+    db["yes"].insert_one({'id': str(ctx.guild.id), 'yes': True, 'history': history})
+    await ctx.send(response)
+  elif db["yes"][str(ctx.guild.id)] == False:
+    db["yes"].update_one({'id': str(ctx.guild.id)}, {'$set': {'yes': True}})
     await ctx.send("The bot will respond to your messages")
+
   else:
-    db["yes"][ctx.guild.id] = False
+    db["yes"].update_one({'id': str(ctx.guild.id)}, {'$set': {'yes': False}})
+    # await ctx.send("sth died")
     await ctx.send("The bot will stop responding to your messages")
 
 
 @bot.command()
 async def sync(ctx):
   await ctx.bot.tree.sync()
+  await ctx.send("Synced")
 
 
 from sys import stdout
@@ -96,8 +101,8 @@ async def execute(ctx, *, body):
   else:
     await ctx.send("You're not a dev and cannot use this command")
 
-
+token="MTA4NzcyODE5ODc3Njc5NTEzNg.G-hhK2.LK1GCTTGcf13XZui97bIs40kWicgNoh8VRSYHg"
 try:
-  bot.run(os.environ['token'])
+  bot.run(os.environ.get("token"))
 except:
   os.system("kill 1")

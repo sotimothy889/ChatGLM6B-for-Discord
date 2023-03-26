@@ -101,7 +101,7 @@ async def execute(ctx, *, body):
   else:
     await ctx.send("You're not a dev and cannot use this command")
 
-token="MTA4NzcyODE5ODc3Njc5NTEzNg.G-hhK2.LK1GCTTGcf13XZui97bIs40kWicgNoh8VRSYHg"
+
 try:
   bot.run(os.environ.get("token"))
 except:
